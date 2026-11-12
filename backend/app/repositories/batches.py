@@ -5,6 +5,8 @@ from typing import Any
 
 import sqlite3
 
+ACTIVE_STATUSES = ("extracting", "aligning")
+
 
 def _batch(r: sqlite3.Row | None) -> dict[str, Any] | None:
     if r is None:
@@ -34,6 +36,25 @@ def get_batch(conn: sqlite3.Connection, batch_id: int) -> dict[str, Any] | None:
     return _batch(conn.execute("SELECT * FROM reconcile_batches WHERE id=?", (batch_id,)).fetchone())
 
 
+def get_active_batch(conn: sqlite3.Connection, pair_id: int) -> dict[str, Any] | None:
+    return _batch(
+        conn.execute(
+            """
+            SELECT * FROM reconcile_batches
+             WHERE pair_id=? AND status IN ('extracting','aligning')
+             ORDER BY id DESC LIMIT 1
+            """,
+            (pair_id,),
+        ).fetchone()
+    )
+
+
+def count_diffs(conn: sqlite3.Connection, batch_id: int) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) c FROM reconcile_diffs WHERE batch_id=?", (batch_id,)
+    ).fetchone()["c"]
+
+
 def list_diffs(
     conn: sqlite3.Connection, *, batch_id: int | None = None, pair_id: int | None = None, limit: int = 200
 ) -> list[dict[str, Any]]:
@@ -50,39 +71,67 @@ def list_diffs(
     return [_diff(r) for r in conn.execute(sql, args).fetchall()]  # type: ignore[misc]
 
 
+def next_batch_no(conn: sqlite3.Connection, now: str) -> str:
+    seq = conn.execute("SELECT COALESCE(MAX(id),0)+1 s FROM reconcile_batches").fetchone()["s"]
+    return f"RB-{now[:10].replace('-', '')}-{seq:04d}"
+
+
 def insert_batch(
     conn: sqlite3.Connection,
     *,
     batch_no: str,
     pair_id: int,
     status: str,
-    counts: dict[str, int],
+    mode: str,
+    reason: str | None,
+    old_left_wm: str,
+    old_right_wm: str,
+    new_left_wm: str,
+    new_right_wm: str,
     note: str | None,
     created_at: str,
 ) -> int:
     cur = conn.execute(
         """
         INSERT INTO reconcile_batches(
-            batch_no, pair_id, status, left_rows, right_rows, matched,
-            left_only, right_only, field_mismatch, diff_total, note, created_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            batch_no, pair_id, status, mode, reason,
+            old_left_wm, old_right_wm, new_left_wm, new_right_wm,
+            left_rows, right_rows, matched, left_only, right_only,
+            field_mismatch, diff_total, note, created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             batch_no,
             pair_id,
             status,
-            counts["left_rows"],
-            counts["right_rows"],
-            counts["matched"],
-            counts["left_only"],
-            counts["right_only"],
-            counts["field_mismatch"],
-            counts["diff_total"],
+            mode,
+            reason,
+            old_left_wm,
+            old_right_wm,
+            new_left_wm,
+            new_right_wm,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
             note,
             created_at,
         ),
     )
     return int(cur.lastrowid)
+
+
+def update_batch(conn: sqlite3.Connection, batch_id: int, **fields: Any) -> None:
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=?" for k in fields)
+    conn.execute(
+        f"UPDATE reconcile_batches SET {cols} WHERE id=?",
+        (*fields.values(), batch_id),
+    )
 
 
 def insert_diff(

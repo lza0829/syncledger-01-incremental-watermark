@@ -21,6 +21,7 @@ onMounted(async () => {
         <div class="stat"><div class="stat-num">{{ stats.open_dispositions }}</div><div class="stat-label">未关处置单</div></div>
       </div>
       <p style="margin-top:1rem">默认策略 <span class="tag">{{ stats.policy }}</span>（只记差异，不盖写两端）</p>
+      <p>水位回退策略 <span class="tag">{{ stats.regression_policy }}</span>（整趟拒绝、不落差异、水位不动；固定策略，非开关）</p>
       <p><router-link to="/run">去对账台跑一趟 →</router-link></p>
     </div>
   </div>

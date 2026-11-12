@@ -9,6 +9,7 @@ router = APIRouter(tags=["batches"])
 class RunBody(BaseModel):
     pair_id: int
     note: str | None = None
+    extract_delay_ms: int = 0  # demo knob: widen the in-flight window
 
 
 @router.get("/batches")
@@ -24,6 +25,8 @@ def list_diffs(batch_id: int | None = None, pair_id: int | None = None):
 @router.post("/reconcile")
 def run_reconcile(body: RunBody):
     try:
-        return svc.run_reconcile(body.pair_id, body.note)
+        return svc.run_reconcile(body.pair_id, body.note, extract_delay_ms=body.extract_delay_ms)
+    except svc.ConcurrentRunError as e:
+        raise HTTPException(409, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
